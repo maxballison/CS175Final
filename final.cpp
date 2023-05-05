@@ -14,8 +14,11 @@
 #include <vector>
 #include <cstdlib>
 #include <ctime>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <algorithm>
 #define GLEW_STATIC
-
 
 #include "GL/glew.h"
 #include "GL/glfw3.h"
@@ -32,8 +35,7 @@ using namespace std; // for string, vector, iostream, and other standard C++ stu
 
 // G L O B A L S ///////////////////////////////////////////////////
 
-
-static const float g_frustMinFov = 60.0; // A minimal of 60 degree field of view
+static const float g_frustMinFov = 60.0;  // A minimal of 60 degree field of view
 static float g_frustFovY = g_frustMinFov; // FOV in y direction (updated by updateFrustFovY)
 
 static const float g_frustNear = -0.1;  // near plane
@@ -41,7 +43,7 @@ static const float g_frustFar = -50.0;  // far plane
 static const float g_groundY = -2.0;    // y coordinate of the ground
 static const float g_groundSize = 10.0; // half the ground length
 
-static GLFWwindow* g_window;
+static GLFWwindow *g_window;
 
 static int g_windowWidth = 512;
 static int g_windowHeight = 512;
@@ -50,20 +52,26 @@ static double g_hScale = 1;
 
 static bool g_mouseClickDown = false; // is the mouse button pressed
 static bool g_mouseLClickButton, g_mouseRClickButton, g_mouseMClickButton;
-static bool g_spaceDown = false; // space state, for middle mouse emulation
+static bool g_spaceDown = false;            // space state, for middle mouse emulation
 static double g_mouseClickX, g_mouseClickY; // coordinates for mouse click event
 static int g_activeShader = 0;
 
-static double g_arcballScreenRadius = 0.25 * (float) g_windowWidth;
+static double g_arcballScreenRadius = 0.25 * (float)g_windowWidth;
 static double g_arcballScale = 1;
 
 static bool g_ego = false;
 
-static int g_gridsize= 20;
-static int g_gridoffset = -1 * g_gridsize/2;
-static int g_SimFPS = 20;
+static int g_gridsize = 10;
+static int g_gridoffset = -1 * g_gridsize / 2;
+static int g_SimFPS = 0;
+std::string g_rule = "6,9/4,6,8-9/10";
 
-struct ShaderState {
+// declaration of string helper functions
+std::string removeSpaces(const std::string &str);
+std::vector<std::vector<int>> parseString(const std::string &input);
+
+struct ShaderState
+{
     GlProgram program;
 
     // Handles to uniform variables
@@ -77,7 +85,8 @@ struct ShaderState {
     GLint h_aPosition;
     GLint h_aNormal;
 
-    ShaderState(const char *vsfn, const char *fsfn) {
+    ShaderState(const char *vsfn, const char *fsfn)
+    {
         readAndCompileShader(program, vsfn, fsfn);
 
         const GLuint h = program; // short hand
@@ -94,7 +103,7 @@ struct ShaderState {
         h_aPosition = safe_glGetAttribLocation(h, "aPosition");
         h_aNormal = safe_glGetAttribLocation(h, "aNormal");
 
-	glBindFragDataLocation(h, 0, "fragColor");
+        glBindFragDataLocation(h, 0, "fragColor");
         checkGlErrors();
     }
 };
@@ -112,7 +121,8 @@ static vector<shared_ptr<ShaderState>>
 #define FIELD_OFFSET(StructType, field) &(((StructType *)0)->field)
 
 // A vertex with floating point position and normal
-struct VertexPN {
+struct VertexPN
+{
     Cvec3f p, n;
 
     VertexPN() {}
@@ -123,19 +133,22 @@ struct VertexPN {
     // can use make* functions from geometrymaker.h
     VertexPN(const GenericVertex &v) { *this = v; }
 
-    VertexPN &operator=(const GenericVertex &v) {
+    VertexPN &operator=(const GenericVertex &v)
+    {
         p = v.pos;
         n = v.normal;
         return *this;
     }
 };
 
-struct Geometry {
+struct Geometry
+{
     GlBufferObject vbo, ibo;
     GlArrayObject vao;
     int vboLen, iboLen;
 
-    Geometry(VertexPN *vtx, unsigned short *idx, int vboLen, int iboLen) {
+    Geometry(VertexPN *vtx, unsigned short *idx, int vboLen, int iboLen)
+    {
         this->vboLen = vboLen;
         this->iboLen = iboLen;
 
@@ -149,7 +162,8 @@ struct Geometry {
                      idx, GL_STATIC_DRAW);
     }
 
-    void draw(const ShaderState &curSS) {
+    void draw(const ShaderState &curSS)
+    {
         // bind the object's VAO
         glBindVertexArray(vao);
 
@@ -173,81 +187,150 @@ struct Geometry {
         // Disable the attributes used by our shader
         safe_glDisableVertexAttribArray(curSS.h_aPosition);
         safe_glDisableVertexAttribArray(curSS.h_aNormal);
-
         // disable VAO
-        glBindVertexArray((GLuint) NULL);
+        glBindVertexArray((GLuint)NULL);
     }
 };
 
 // Vertex buffer and index buffer associated with the ground and cube geometry
 static shared_ptr<Geometry> g_ground, g_cube, g_arcball;
 
-
-
-
-class Life3D {
-  public: Life3D(int width, int height, int depth): width_(width),
-  height_(height),
-  depth_(depth) {
-    cells_.resize(width * height * depth);
-  }
-  void randomInit() {
-    for (int i = 0; i < width_ * height_ * depth_; ++i) {
-      cells_[i] = rand() % 2;
+class Life3D
+{
+public:
+    Life3D(int width, int height, int depth) : width_(width),
+                                               height_(height),
+                                               depth_(depth)
+    {
+        cells_.resize(width * height * depth);
     }
-  }
-  void update() { 
-    std::vector<int> newCells(width_ * height_ * depth_); 
-    for (int x = 0; x < width_; ++x) { 
-        for (int y = 0; y < height_; ++y) { 
-            for (int z = 0; z < depth_; ++z) { 
-                int neighbors = countNeighbors(x, y, z); 
-                int index = getIndex(x, y, z); 
-                if (cells_[index] == 0) { 
-                    newCells[index] = (neighbors >= 14 && neighbors <= 19) ? 1 : 0; } 
-                    else { newCells[index] = (neighbors < 13 || neighbors == 8) ? 0 : 1; } } } } 
-                    cells_ = std::move(newCells); 
+    Life3D() : spawnRule{}, deathRule{}
+    {
+        std::fill_n(spawnRule, 27, false);
+        std::fill_n(deathRule, 27, false);
+
     }
-  int getCell(int x, int y, int z) const {
-    return cells_[getIndex(x, y, z)];
-  }
-  int getWidth() const { return width_; }
-  int getHeight() const { return height_; }
-  int getDepth() const { return depth_; }
-  private: int getIndex(int x, int y, int z) const {
-    return x + y * width_ + z * width_ * height_;
-  }
-  int countNeighbors(int x, int y, int z) const {
-    int count = 0;
-    for (int dx = -1; dx <= 1; ++dx) {
-      for (int dy = -1; dy <= 1; ++dy) {
-        for (int dz = -1; dz <= 1; ++dz) {
-          if (dx == 0 && dy == 0 && dz == 0) continue;
-          int nx = (x + dx + width_) % width_;
-          int ny = (y + dy + height_) % height_;
-          int nz = (z + dz + depth_) % depth_;
-          count += cells_[getIndex(nx, ny, nz)];
+    int decay;
+
+    void randomInit()
+    {
+        for (int i = 0; i < width_ * height_; ++i)
+        {
+            cells_[i] = rand() % 2;
         }
-      }
     }
-    return count;
-  }
-  int width_,
-  height_,
-  depth_;
-  std::vector < int > cells_;
+    void update()
+    {
+        std::vector<int> newCells(width_ * height_ * depth_);
+        for (int x = 0; x < width_; ++x)
+        {
+            for (int y = 0; y < height_; ++y)
+            {
+                for (int z = 0; z < depth_; ++z)
+                {
+                    int neighbors = countNeighbors(x, y, z);
+                    int index = getIndex(x, y, z);
+
+                    if (cells_[index] == 0)
+                    {
+                        if (spawnRule[neighbors] == true) {
+                            newCells[index] = 1;
+                        }
+                        else {
+                            newCells[index] = 0;
+                        }
+                        //newCells[index] = (spawnRule[neighbors] == true) ? 1 : 0;
+                    }
+                    else if (cells_[index] == 1)
+                    {
+                        newCells[index] = (deathRule[neighbors] == true) ?  decay : 1;
+                    }
+                    else
+                    {
+                        newCells[index]++;
+                    }
+                }
+            }
+        }
+        cells_ = std::move(newCells);
+        cout << cells_[getIndex(0, 0, 0)]<< endl;
+    }
+    int getCell(int x, int y, int z) const
+    {
+        return cells_[getIndex(x, y, z)];
+    }
+    int getWidth() const { return width_; }
+    int getHeight() const { return height_; }
+    int getDepth() const { return depth_; }
+
+    void fillArrays()
+    {
+        std::vector<std::vector<int>> parsed = parseString(g_rule);
+        decay = parsed[2][0] * -1;
+        for (int i = 0; i < parsed[0].size(); i++)
+        {
+            spawnRule[parsed[0][i]] = true;
+        }
+        for (int i = 0; i < parsed[1].size(); i++)
+        {
+            deathRule[parsed[1][i]] = true;
+        }
+        for (int i = 0; i < 27; i++) {
+            std::cout << spawnRule[i] << ',';
+        }
+        std:: cout << endl;
+        for (int i = 0; i < 27; i++) {
+            std::cout << deathRule[i] << ',';
+        }
+        std::cout << endl;
+    }
+private:
+    int getIndex(int x, int y, int z) const
+    {
+        return x + y * width_ + z * width_ * height_;
+    }
+    bool spawnRule[24];
+    bool deathRule[24];
+    int countNeighbors(int x, int y, int z) const
+    {
+        int count = 0;
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            for (int dy = -1; dy <= 1; ++dy)
+            {
+                for (int dz = -1; dz <= 1; ++dz)
+                {
+                    if (dx == 0 && dy == 0 && dz == 0)
+                        continue;
+                    int nx = (x + dx + width_) % width_;
+                    int ny = (y + dy + height_) % height_;
+                    int nz = (z + dz + depth_) % depth_;
+                    int status = cells_[getIndex(nx, ny, nz)];
+                    if (status < 0) {
+                        count += 1;
+                    }
+                    else {
+                        count += status;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+    int width_,
+        height_,
+        depth_;
+    std::vector<int> cells_;
 };
-// Add a global variable for the game state 
-Life3D g_life3D(g_gridsize,g_gridsize,g_gridsize);
-// Add this new function to initialize the game state 
-void initLife3D() {
-  srand(time(NULL));
-  g_life3D.randomInit();
+// Add a global variable for the game state
+Life3D g_life3D(g_gridsize, g_gridsize, g_gridsize);
+// Add this new function to initialize the game state
+void initLife3D()
+{
+    srand(time(NULL));
+    g_life3D.randomInit();
+    g_life3D.fillArrays();
 }
-
-
-
-
 
 // --------- Scene
 
@@ -255,11 +338,12 @@ static const Cvec3 g_light1(2.0, 3.0, 16.0),
     g_light2(-2, 3.0, -16.0); // define two lights positions in world space
 static RigTForm g_skyRbt = RigTForm(Cvec3(0.0, 0.25, 30));
 static RigTForm g_objectRbt[2] = {RigTForm(
-    Cvec3(-1, 0, 0)), RigTForm(Cvec3(1,0,0))}; //define two cubes
+                                      Cvec3(-1, 0, 0)),
+                                  RigTForm(Cvec3(1, 0, 0))}; // define two cubes
 
-static RigTForm g_arcballRbt = RigTForm(Cvec3(0,0,0));
-static Cvec3f g_objectColors[2] = {Cvec3f(1, 0, 0), Cvec3f(0, 0, 1)}; //define two colors
-static vector<RigTForm*> g_frames = {&g_skyRbt, &g_objectRbt[0], &g_objectRbt[1]};
+static RigTForm g_arcballRbt = RigTForm(Cvec3(0, 0, 0));
+static Cvec3f g_objectColors[2] = {Cvec3f(1, 0, 0), Cvec3f(0, 0, 1)}; // define two colors
+static vector<RigTForm *> g_frames = {&g_skyRbt, &g_objectRbt[0], &g_objectRbt[1]};
 
 static int g_frame_index = 0;
 static int g_object_index = 0;
@@ -267,7 +351,8 @@ static int g_object_index = 0;
 ///////////////// END OF G L O B A L S
 /////////////////////////////////////////////////////
 
-static void initGround() {
+static void initGround()
+{
     // A x-z plane at y = g_groundY of dimension [-g_groundSize, g_groundSize]^2
     VertexPN vtx[4] = {
         VertexPN(-g_groundSize, g_groundY, -g_groundSize, 0, 1, 0),
@@ -279,7 +364,8 @@ static void initGround() {
     g_ground.reset(new Geometry(&vtx[0], &idx[0], 4, 6));
 }
 
-static void initCubes() {
+static void initCubes()
+{
     int ibLen, vbLen;
     getCubeVbIbLen(vbLen, ibLen);
 
@@ -291,27 +377,28 @@ static void initCubes() {
     g_cube.reset(new Geometry(&vtx[0], &idx[0], vbLen, ibLen));
 }
 
-static void initArcball() {
+static void initArcball()
+{
 
     int slices = 36; // couldn't find how many we wanted?
     int stacks = 18;
-    
-    int ibLen, vbLen;
-    
-    getSphereVbIbLen(slices, stacks, vbLen, ibLen);    
 
-    //storage for sphere geometry
+    int ibLen, vbLen;
+
+    getSphereVbIbLen(slices, stacks, vbLen, ibLen);
+
+    // storage for sphere geometry
     vector<VertexPN> vtx(vbLen);
     vector<unsigned short> idx(ibLen);
 
     makeSphere(1, slices, stacks, vtx.begin(), idx.begin());
     g_arcball.reset(new Geometry(&vtx[0], &idx[0], vbLen, ibLen));
-
 }
 
 // takes a projection matrix and send to the the shaders
 static void sendProjectionMatrix(const ShaderState &curSS,
-                                 const Matrix4 &projMatrix) {
+                                 const Matrix4 &projMatrix)
+{
     GLfloat glmatrix[16];
     projMatrix.writeToColumnMajorMatrix(glmatrix); // send projection matrix
     safe_glUniformMatrix4fv(curSS.h_uProjMatrix, glmatrix);
@@ -319,7 +406,8 @@ static void sendProjectionMatrix(const ShaderState &curSS,
 
 // takes MVM and its normal matrix to the shaders
 static void sendModelViewNormalMatrix(const ShaderState &curSS,
-                                      const Matrix4 &MVM, const Matrix4 &NMVM) {
+                                      const Matrix4 &MVM, const Matrix4 &NMVM)
+{
     GLfloat glmatrix[16];
     MVM.writeToColumnMajorMatrix(glmatrix); // send MVM
     safe_glUniformMatrix4fv(curSS.h_uModelViewMatrix, glmatrix);
@@ -329,10 +417,12 @@ static void sendModelViewNormalMatrix(const ShaderState &curSS,
 }
 
 // update g_frustFovY from g_frustMinFov, g_windowWidth, and g_windowHeight
-static void updateFrustFovY() {
+static void updateFrustFovY()
+{
     if (g_windowWidth >= g_windowHeight)
         g_frustFovY = g_frustMinFov;
-    else {
+    else
+    {
         const double RAD_PER_DEG = 0.5 * CS175_PI / 180;
         g_frustFovY = atan2(sin(g_frustMinFov * RAD_PER_DEG) * g_windowHeight /
                                 g_windowWidth,
@@ -341,13 +431,15 @@ static void updateFrustFovY() {
     }
 }
 
-static Matrix4 makeProjectionMatrix() {
+static Matrix4 makeProjectionMatrix()
+{
     return Matrix4::makeProjection(
         g_frustFovY, g_windowWidth / static_cast<double>(g_windowHeight),
         g_frustNear, g_frustFar);
 }
 
-static void drawStuff() {
+static void drawStuff()
+{
     // short hand for current shader state
     const ShaderState &curSS = *g_shaderStates[g_activeShader];
 
@@ -364,93 +456,104 @@ static void drawStuff() {
     const Cvec3 eyeLight2 = Cvec3(
         invEyeRbt * Cvec4(g_light2, 1)); // g_light2 position in eye coordinates
     safe_glUniform3f(curSS.h_uLight, eyeLight1[0], eyeLight1[1], eyeLight1[2]);
-    safe_glUniform3f(curSS.h_uLight2, eyeLight2[0], eyeLight2[1], eyeLight2[2]); 
-    /*// draw ground // =========== 
-    const RigTForm groundRbt = RigTForm(); 
-    // identity 
-    Matrix4 MVM = rigTFormToMatrix(invEyeRbt * groundRbt); 
-    Matrix4 NMVM = normalMatrix(MVM); 
-    sendModelViewNormalMatrix(curSS, MVM, NMVM); 
-    safe_glUniform3f(curSS.h_uColor, 0.1, 0.95, 0.1); 
-    // set color 
-    g_ground->draw(curSS); */
-    // draw cubes from Life3D game state 
-    // ================================== 
-    
-    for (int x = 0; x < g_life3D.getWidth(); ++x) { 
-        for (int y = 0; y < g_life3D.getHeight(); ++y) { 
-            for (int z = 0; z < g_life3D.getDepth(); ++z) { 
-                if (g_life3D.getCell(x, y, z) == 1) { 
-                    RigTForm cubeRbt = RigTForm(Cvec3(x+g_gridoffset, y+g_gridoffset, z+g_gridoffset)); 
-                    Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt); 
-                    Matrix4 NMVM = normalMatrix(MVM); 
-                    sendModelViewNormalMatrix(curSS, MVM, NMVM); 
-                    safe_glUniform3f(curSS.h_uColor, 1.0, 1.0, 1.0); 
-                    // set color 
-                    g_cube->draw(curSS); 
-                } 
-            } 
-        } 
-    } 
-}
-    /*
-    // draw ground
-    // ===========
-    //
-    const RigTForm groundRbt = RigTForm(); // identity
+    safe_glUniform3f(curSS.h_uLight2, eyeLight2[0], eyeLight2[1], eyeLight2[2]);
+    /*// draw ground // ===========
+    const RigTForm groundRbt = RigTForm();
+    // identity
     Matrix4 MVM = rigTFormToMatrix(invEyeRbt * groundRbt);
     Matrix4 NMVM = normalMatrix(MVM);
     sendModelViewNormalMatrix(curSS, MVM, NMVM);
-    safe_glUniform3f(curSS.h_uColor, 0.1, 0.95, 0.1); // set color
-    g_ground->draw(curSS);
+    safe_glUniform3f(curSS.h_uColor, 0.1, 0.95, 0.1);
+    // set color
+    g_ground->draw(curSS); */
+    // draw cubes from Life3D game state
+    // ==================================
 
-    // draw cube number 1
-    // ==========
-    MVM = rigTFormToMatrix(invEyeRbt * g_objectRbt[0]);
-    NMVM = normalMatrix(MVM);
-    sendModelViewNormalMatrix(curSS, MVM, NMVM);
-    safe_glUniform3f(curSS.h_uColor, g_objectColors[0][0], g_objectColors[0][1],
-                     g_objectColors[0][2]);
-    g_cube->draw(curSS);
+    for (int x = 0; x < g_life3D.getWidth(); ++x)
+    {
+        for (int y = 0; y < g_life3D.getHeight(); ++y)
+        {
+            for (int z = 0; z < g_life3D.getDepth(); ++z)
+            {
+                int temp = g_life3D.getCell(x, y, z);
+                if (temp != 0)
+                {
+                    RigTForm cubeRbt = RigTForm(Cvec3(x + g_gridoffset, y + g_gridoffset, z + g_gridoffset));
+                    Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt);
+                    Matrix4 NMVM = normalMatrix(MVM);
+                    sendModelViewNormalMatrix(curSS, MVM, NMVM);
+                    if (x==0&&y==0&&z==0) {
 
-    // draw cube number 2
-    // ===========
-    MVM = rigTFormToMatrix(invEyeRbt * g_objectRbt[1]);
-    NMVM = normalMatrix(MVM);
-    sendModelViewNormalMatrix(curSS, MVM, NMVM);
-    safe_glUniform3f(curSS.h_uColor, g_objectColors[1][0], g_objectColors[1][1],
-                     g_objectColors[1][2]);
-    g_cube->draw(curSS);
-    
-    // draw arcball
-    //===============
-    
-    // check if manipulating a cube with respect to cube-sky
-    if (g_object_index > 0) {
-        g_arcballRbt = *g_frames[g_object_index];
-
-        // update global stuff for sphere
-        if (!(g_mouseMClickButton ||
-               (g_mouseLClickButton && g_mouseRClickButton) ||
-               (g_mouseLClickButton && !g_mouseRClickButton &&
-                g_spaceDown))) {
-
-            g_arcballScale = getScreenToEyeScale(-norm(g_arcballRbt.getTranslation() - eyeRbt.getTranslation()), g_frustFovY, g_windowHeight);
+                    safe_glUniform3f(curSS.h_uColor, 1.0, 0.0, 0.0);
+                    }
+                    else {
+                    safe_glUniform3f(curSS.h_uColor, 1.0, 1.0, 1.0);
+                    }
+                    // set color
+                    g_cube->draw(curSS);
+                }
+            }
         }
+    }
+}
+/*
+// draw ground
+// ===========
+//
+const RigTForm groundRbt = RigTForm(); // identity
+Matrix4 MVM = rigTFormToMatrix(invEyeRbt * groundRbt);
+Matrix4 NMVM = normalMatrix(MVM);
+sendModelViewNormalMatrix(curSS, MVM, NMVM);
+safe_glUniform3f(curSS.h_uColor, 0.1, 0.95, 0.1); // set color
+g_ground->draw(curSS);
 
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); // draw wireframe
-        MVM = rigTFormToMatrix(invEyeRbt * g_arcballRbt);
-        double radius = g_arcballScale * g_arcballScreenRadius;
-        MVM = MVM * Matrix4::makeScale(Cvec3(radius));
-        NMVM = normalMatrix(MVM);
-        sendModelViewNormalMatrix(curSS, MVM, NMVM);
-        safe_glUniform3f(curSS.h_uColor, .2,.2,.2);
-        g_arcball->draw(curSS);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // draw filled again
-    }*/
+// draw cube number 1
+// ==========
+MVM = rigTFormToMatrix(invEyeRbt * g_objectRbt[0]);
+NMVM = normalMatrix(MVM);
+sendModelViewNormalMatrix(curSS, MVM, NMVM);
+safe_glUniform3f(curSS.h_uColor, g_objectColors[0][0], g_objectColors[0][1],
+                 g_objectColors[0][2]);
+g_cube->draw(curSS);
 
+// draw cube number 2
+// ===========
+MVM = rigTFormToMatrix(invEyeRbt * g_objectRbt[1]);
+NMVM = normalMatrix(MVM);
+sendModelViewNormalMatrix(curSS, MVM, NMVM);
+safe_glUniform3f(curSS.h_uColor, g_objectColors[1][0], g_objectColors[1][1],
+                 g_objectColors[1][2]);
+g_cube->draw(curSS);
 
-static void display() {
+// draw arcball
+//===============
+
+// check if manipulating a cube with respect to cube-sky
+if (g_object_index > 0) {
+    g_arcballRbt = *g_frames[g_object_index];
+
+    // update global stuff for sphere
+    if (!(g_mouseMClickButton ||
+           (g_mouseLClickButton && g_mouseRClickButton) ||
+           (g_mouseLClickButton && !g_mouseRClickButton &&
+            g_spaceDown))) {
+
+        g_arcballScale = getScreenToEyeScale(-norm(g_arcballRbt.getTranslation() - eyeRbt.getTranslation()), g_frustFovY, g_windowHeight);
+    }
+
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); // draw wireframe
+    MVM = rigTFormToMatrix(invEyeRbt * g_arcballRbt);
+    double radius = g_arcballScale * g_arcballScreenRadius;
+    MVM = MVM * Matrix4::makeScale(Cvec3(radius));
+    NMVM = normalMatrix(MVM);
+    sendModelViewNormalMatrix(curSS, MVM, NMVM);
+    safe_glUniform3f(curSS.h_uColor, .2,.2,.2);
+    g_arcball->draw(curSS);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // draw filled again
+}*/
+
+static void display()
+{
     glUseProgram(g_shaderStates[g_activeShader]->program);
     // clear framebuffer color&depth
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -462,21 +565,23 @@ static void display() {
     checkGlErrors();
 }
 
-static void reshape(GLFWwindow * window, const int w, const int h) {
+static void reshape(GLFWwindow *window, const int w, const int h)
+{
     int width, height;
-    glfwGetFramebufferSize(g_window, &width, &height); 
+    glfwGetFramebufferSize(g_window, &width, &height);
     glViewport(0, 0, width, height);
-    
+
     g_windowWidth = w;
     g_windowHeight = h;
 
-    g_arcballScreenRadius =  0.25 * min(g_windowWidth, g_windowHeight);
+    g_arcballScreenRadius = 0.25 * min(g_windowWidth, g_windowHeight);
 
     cerr << "Size of window is now " << g_windowWidth << "x" << g_windowHeight << endl;
     updateFrustFovY();
 }
 
-static void motion(GLFWwindow *window, double x, double y) {
+static void motion(GLFWwindow *window, double x, double y)
+{
     const double dx = x - g_mouseClickX;
     const double dy = g_windowHeight - y - 1 - g_mouseClickY;
 
@@ -486,74 +591,84 @@ static void motion(GLFWwindow *window, double x, double y) {
     // cout <<  eyecoord[0]<<"," << eyecoord[1] << "," <<eyecoord[2]<< endl;
 
     // calculate v_2
-    Cvec2 center_screen_coords = getScreenSpaceCoord(eyecoord, 
-        makeProjectionMatrix(), g_frustNear, g_frustFovY, g_windowWidth, g_windowHeight);
-    
-    cout << center_screen_coords[0] << ", "<< center_screen_coords[1] << endl;
+    Cvec2 center_screen_coords = getScreenSpaceCoord(eyecoord,
+                                                     makeProjectionMatrix(), g_frustNear, g_frustFovY, g_windowWidth, g_windowHeight);
+
 
     double adj_x_2 = x - center_screen_coords[0];
-    double adj_y_2 =  g_windowHeight - y - 1 - center_screen_coords[1];
+    double adj_y_2 = g_windowHeight - y - 1 - center_screen_coords[1];
 
-    double z_coord_on_sphere_2 = g_arcballScreenRadius * g_arcballScreenRadius 
-                                    - pow(adj_x_2, 2) 
-                                    - pow(adj_y_2, 2);
-    
+    double z_coord_on_sphere_2 = g_arcballScreenRadius * g_arcballScreenRadius - pow(adj_x_2, 2) - pow(adj_y_2, 2);
+
     // clamping to the sphere
-    if (z_coord_on_sphere_2 < 0) {
+    if (z_coord_on_sphere_2 < 0)
+    {
         z_coord_on_sphere_2 = 0;
-    } else {
+    }
+    else
+    {
         z_coord_on_sphere_2 = sqrt(z_coord_on_sphere_2);
     }
     Cvec3 v_2 = Cvec3(adj_x_2, adj_y_2, z_coord_on_sphere_2).normalize();
 
-
     // calculate v_1
     double adj_x_1 = g_mouseClickX - center_screen_coords[0];
-    double adj_y_1 =  g_mouseClickY - center_screen_coords[1];
+    double adj_y_1 = g_mouseClickY - center_screen_coords[1];
 
-    double z_coord_on_sphere_1 = g_arcballScreenRadius * g_arcballScreenRadius 
-                                    - pow(adj_x_1, 2) 
-                                    - pow(adj_y_1, 2);
-    
+    double z_coord_on_sphere_1 = g_arcballScreenRadius * g_arcballScreenRadius - pow(adj_x_1, 2) - pow(adj_y_1, 2);
+
     // clamping to the sphere
-    if (z_coord_on_sphere_1 < 0) {
+    if (z_coord_on_sphere_1 < 0)
+    {
         z_coord_on_sphere_1 = 0;
-    } else {
-        z_coord_on_sphere_1 =  sqrt(z_coord_on_sphere_1);
+    }
+    else
+    {
+        z_coord_on_sphere_1 = sqrt(z_coord_on_sphere_1);
     }
     Cvec3 v_1 = Cvec3(adj_x_1, adj_y_1, z_coord_on_sphere_1).normalize();
 
-
-
     RigTForm m;
     if (g_mouseLClickButton && !g_mouseRClickButton &&
-        !g_spaceDown) { // left button down?
-        if (g_frame_index > 0) { // in object frame
+        !g_spaceDown)
+    { // left button down?
+        if (g_frame_index > 0)
+        { // in object frame
             RigTForm OT = RigTForm(g_frames[g_object_index]->getTranslation());
             RigTForm ER = RigTForm(g_frames[g_frame_index]->getRotation());
             Quat rot;
-            if (g_object_index != g_frame_index) {
+            if (g_object_index != g_frame_index)
+            {
                 rot = (Quat::makeXRotation(-dy) * Quat::makeYRotation(dx));
-            } else {
+            }
+            else
+            {
                 rot = (Quat::makeXRotation(dy) * Quat::makeYRotation(-dx));
             }
             m = rbtMtoOwrtA(RigTForm(rot), OT * ER);
-        } else if (g_object_index == 0 && g_frame_index == 0){
-            if (g_ego) {
-                // ego mode 
+        }
+        else if (g_object_index == 0 && g_frame_index == 0)
+        {
+            if (g_ego)
+            {
+                // ego mode
                 RigTForm ET = RigTForm(g_skyRbt.getTranslation());
                 RigTForm yrot = RigTForm(Quat::makeYRotation(-dx));
                 RigTForm yrota = rbtMtoOwrtA(yrot, ET);
-                RigTForm xrot =  RigTForm(Quat::makeXRotation(dy));
+                RigTForm xrot = RigTForm(Quat::makeXRotation(dy));
                 RigTForm xrota = rbtMtoOwrtA(xrot, g_skyRbt);
                 m = yrota * xrota;
-            } else {
+            }
+            else
+            {
                 // orbit mode
                 RigTForm ER = RigTForm(g_skyRbt.getRotation());
                 RigTForm xrot = RigTForm(Quat::makeXRotation(dy));
-                m =  RigTForm(Quat::makeYRotation(-dx)) * rbtMtoOwrtA(xrot, ER);
+                m = RigTForm(Quat::makeYRotation(-dx)) * rbtMtoOwrtA(xrot, ER);
             }
-        } else {
+        }
+        else
+        {
             RigTForm OT = RigTForm(g_frames[g_object_index]->getTranslation());
             RigTForm ER = RigTForm(g_skyRbt.getRotation());
             // RigTForm rot = RigTForm(Quat::makeXRotation(-dy) * Quat::makeYRotation(dx));
@@ -561,50 +676,66 @@ static void motion(GLFWwindow *window, double x, double y) {
             m = rbtMtoOwrtA(RigTForm(rot), OT * ER);
             // m = RigTForm(rot);
         }
-        
-    } else if (g_mouseRClickButton &&
-               !g_mouseLClickButton) { // right button down?
-        if (g_object_index == 0) {
+    }
+    else if (g_mouseRClickButton &&
+             !g_mouseLClickButton)
+    { // right button down?
+        if (g_object_index == 0)
+        {
             RigTForm translate = RigTForm(Cvec3(-dx, -dy, 0) * g_arcballScale);
             m = rbtMtoOwrtA(translate, *g_frames[g_frame_index]);
-        } else {
+        }
+        else
+        {
             RigTForm translate = RigTForm(Cvec3(dx, dy, 0) * g_arcballScale);
             m = rbtMtoOwrtA(translate, *g_frames[g_frame_index]);
         }
-        
-    } else if (g_mouseMClickButton ||
-               (g_mouseLClickButton && g_mouseRClickButton) ||
-               (g_mouseLClickButton && !g_mouseRClickButton &&
-                g_spaceDown)) { // middle or (left and right, or left + space)
-                                // button down?
+    }
+    else if (g_mouseMClickButton ||
+             (g_mouseLClickButton && g_mouseRClickButton) ||
+             (g_mouseLClickButton && !g_mouseRClickButton &&
+              g_spaceDown))
+    { // middle or (left and right, or left + space)
+      // button down?
         RigTForm translate;
-        if (g_object_index != g_frame_index) {
+        if (g_object_index != g_frame_index)
+        {
             translate = RigTForm(Cvec3(0, 0, -dy) * g_arcballScale);
-        } else {
+        }
+        else
+        {
             translate = RigTForm(Cvec3(0, 0, dy) * g_arcballScale);
         }
         m = rbtMtoOwrtA(translate, *g_frames[g_frame_index]);
     }
 
-    if (g_mouseClickDown) {
-        if (g_frame_index > 0 && g_object_index == 0) {
+    if (g_mouseClickDown)
+    {
+        if (g_frame_index > 0 && g_object_index == 0)
+        {
             // do nothing we don't edit the sky while in an object
-        } else if (g_frame_index == 0 && g_object_index == 0) {
-            *g_frames[g_object_index] = m *  *g_frames[g_object_index];
-        } else if (g_mouseRClickButton &&
-               !g_mouseLClickButton) {
-            *g_frames[g_object_index] = m *  *g_frames[g_object_index];
-        } else {
+        }
+        else if (g_frame_index == 0 && g_object_index == 0)
+        {
+            *g_frames[g_object_index] = m * *g_frames[g_object_index];
+        }
+        else if (g_mouseRClickButton &&
+                 !g_mouseLClickButton)
+        {
+            *g_frames[g_object_index] = m * *g_frames[g_object_index];
+        }
+        else
+        {
             *g_frames[g_object_index] = m * *g_frames[g_object_index];
         } // Simply right-multiply is WRONG
-        
     }
 
     g_mouseClickX = x;
     g_mouseClickY = g_windowHeight - y - 1;
 }
 
-static void mouse(GLFWwindow *window, int button, int state, int mods) {
+static void mouse(GLFWwindow *window, int button, int state, int mods)
+{
     double x, y;
     glfwGetCursorPos(window, &x, &y);
 
@@ -623,9 +754,12 @@ static void mouse(GLFWwindow *window, int button, int state, int mods) {
     g_mouseClickDown = g_mouseLClickButton || g_mouseRClickButton || g_mouseMClickButton;
 }
 
-static void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-        switch (key) {
+static void keyboard(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+    if (action == GLFW_PRESS || action == GLFW_REPEAT)
+    {
+        switch (key)
+        {
         case GLFW_KEY_ESCAPE:
             exit(0);
         case GLFW_KEY_H:
@@ -650,11 +784,16 @@ static void keyboard(GLFWwindow* window, int key, int scancode, int action, int 
             break;
         case GLFW_KEY_V:
             g_frame_index = (g_frame_index + 1) % 3;
-            if (g_frame_index == 0) {
+            if (g_frame_index == 0)
+            {
                 cout << "Active eye is Sky" << endl;
-            } else if (g_frame_index == 1) {
+            }
+            else if (g_frame_index == 1)
+            {
                 cout << "Active eye is Object 0" << endl;
-            } else {
+            }
+            else
+            {
                 cout << "Active eye is Object 1" << endl;
             }
             break;
@@ -670,11 +809,15 @@ static void keyboard(GLFWwindow* window, int key, int scancode, int action, int 
             g_life3D.randomInit();
             break;
         case GLFW_KEY_M:
-            g_ego = !g_ego;
-            cout << "Ego mode: " << g_ego << endl;
+            g_life3D.update();
+            //g_ego = !g_ego;
+            //cout << "Ego mode: " << g_ego << endl;
         }
-    } else {
-        switch (key) {
+    }
+    else
+    {
+        switch (key)
+        {
         case GLFW_KEY_SPACE:
             g_spaceDown = false;
             break;
@@ -682,11 +825,13 @@ static void keyboard(GLFWwindow* window, int key, int scancode, int action, int 
     }
 }
 
-void error_callback(int error, const char* description) {
+void error_callback(int error, const char *description)
+{
     fprintf(stderr, "Error: %s\n", description);
 }
 
-static void initGlfwState() {
+static void initGlfwState()
+{
     glfwInit();
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -698,7 +843,8 @@ static void initGlfwState() {
 
     g_window = glfwCreateWindow(g_windowWidth, g_windowHeight,
                                 "Assignment 3", NULL, NULL);
-    if (!g_window) {
+    if (!g_window)
+    {
         fprintf(stderr, "Failed to create GLFW window or OpenGL context\n");
         exit(1);
     }
@@ -722,10 +868,10 @@ static void initGlfwState() {
 
     g_wScale = pixel_width / screen_width;
     g_hScale = pixel_height / screen_height;
-    
 }
 
-static void initGLState() {
+static void initGLState()
+{
     glClearColor(128. / 255., 200. / 255., 255. / 255., 0.);
     glClearDepth(0.);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -738,30 +884,36 @@ static void initGLState() {
     glEnable(GL_FRAMEBUFFER_SRGB);
 }
 
-static void initShaders() {
+static void initShaders()
+{
     g_shaderStates.resize(g_numShaders);
-    for (int i = 0; i < g_numShaders; ++i) {
-      g_shaderStates[i].reset(
-			      new ShaderState(g_shaderFiles[i][0], g_shaderFiles[i][1]));
+    for (int i = 0; i < g_numShaders; ++i)
+    {
+        g_shaderStates[i].reset(
+            new ShaderState(g_shaderFiles[i][0], g_shaderFiles[i][1]));
     }
 }
 
-static void initGeometry() {
+static void initGeometry()
+{
     initGround();
     initCubes();
     initArcball();
 }
 
-void glfwLoop() {
+void glfwLoop()
+{
     double targetSimDeltaTime = 1.0 / g_SimFPS;
     double lastSimUpdateTime = glfwGetTime();
-    while (!glfwWindowShouldClose(g_window)) {
+    while (!glfwWindowShouldClose(g_window))
+    {
         double currentTime = glfwGetTime();
         double simDeltaTime = currentTime - lastSimUpdateTime;
-        if (simDeltaTime >= targetSimDeltaTime) {
-          g_life3D.update(); // update the simulation
-          lastSimUpdateTime = currentTime;
-       }
+        if (simDeltaTime >= targetSimDeltaTime)
+        {
+            //g_life3D.update(); // update the simulation
+            lastSimUpdateTime = currentTime;
+        }
 
         display();
         glfwPollEvents();
@@ -769,13 +921,14 @@ void glfwLoop() {
     printf("end loop\n");
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     Matrix4 id = Matrix4();
     Matrix4 test_lin = linFact(id);
     Matrix4 test_trans = transFact(id);
 
-
-    try {
+    try
+    {
         initGlfwState();
 
         glewInit(); // load the OpenGL extensions
@@ -786,18 +939,68 @@ int main(int argc, char *argv[]) {
                                 "Shading Language v1.3");
 #endif
 
-
         initGLState();
         initShaders();
         initGeometry();
         initLife3D();
         glfwLoop();
         return 0;
-    } catch (const runtime_error &e) {
+    }
+    catch (const runtime_error &e)
+    {
         cout << "Exception caught: " << e.what() << endl;
         return -1;
     }
 }
 
+// removes spaces from an input string
+std::string removeSpaces(const std::string &str)
+{
+    std::string result;
+    for (const auto &c : str)
+    {
+        if (c != ' ')
+        {
+            result.push_back(c);
+        }
+    }
+    return result;
+}
 
+// parses a string to figure out what our rule is
+std::vector<std::vector<int>> parseString(const std::string &input)
+{
+    std::vector<std::vector<int>> result;
+    std::istringstream ss(removeSpaces(input));
+    std::string segment;
 
+    while (std::getline(ss, segment, '/'))
+    {
+        std::vector<int> nums;
+        std::istringstream segmentStream(segment);
+        std::string number;
+
+        while (std::getline(segmentStream, number, ','))
+        {
+            size_t dashPos = number.find('-');
+
+            if (dashPos != std::string::npos)
+            {
+                int start = std::stoi(number.substr(0, dashPos));
+                int end = std::stoi(number.substr(dashPos + 1));
+
+                for (int i = start; i <= end; ++i)
+                {
+                    nums.push_back(i);
+                }
+            }
+            else
+            {
+                nums.push_back(std::stoi(number));
+            }
+        }
+        result.push_back(nums);
+    }
+
+    return result;
+}
