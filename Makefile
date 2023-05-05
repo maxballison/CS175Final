@@ -1,4 +1,4 @@
-BASE = asst3
+BASE = final
 
 all: $(BASE)
 
