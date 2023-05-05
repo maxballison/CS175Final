@@ -1,0 +1,12 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/Users/maxballison/code/cs175/assignment_4-max-lucy-1",
+            "binaryPath": "/Users/maxballison/code/cs175/assignment_4-max-lucy-1/asst3",
+            "binaryArgs": []
+        }
+    ],
+    "files.associations": {
+        "iostream": "cpp"
+    }
+}
