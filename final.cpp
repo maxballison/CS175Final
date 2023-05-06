@@ -39,7 +39,7 @@ static const float g_frustMinFov = 60.0;  // A minimal of 60 degree field of vie
 static float g_frustFovY = g_frustMinFov; // FOV in y direction (updated by updateFrustFovY)
 
 static const float g_frustNear = -0.1;  // near plane
-static const float g_frustFar = -50.0;  // far plane
+static const float g_frustFar = -200.0;  // far plane
 static const float g_groundY = -2.0;    // y coordinate of the ground
 static const float g_groundSize = 10.0; // half the ground length
 
@@ -61,10 +61,12 @@ static double g_arcballScale = 1;
 
 static bool g_ego = false;
 
-static int g_gridsize = 10;
+static int g_gridsize = 50;
 static int g_gridoffset = -1 * g_gridsize / 2;
-static int g_SimFPS = 0;
+static int g_SimFPS = 30;
 std::string g_rule = "6,9/4,6,8-9/10";
+//std::string g_rule = "4/4/5";
+static bool g_paused = true;
 
 // declaration of string helper functions
 std::string removeSpaces(const std::string &str);
@@ -222,6 +224,7 @@ public:
     void update()
     {
         std::vector<int> newCells(width_ * height_ * depth_);
+        newCells = cells_;
         for (int x = 0; x < width_; ++x)
         {
             for (int y = 0; y < height_; ++y)
@@ -230,6 +233,10 @@ public:
                 {
                     int neighbors = countNeighbors(x, y, z);
                     int index = getIndex(x, y, z);
+                    if (index == getIndex(1,0,0) && cells_[index] < 0) {
+                        cout << "neighbors: " << neighbors << endl;
+                        cout << "cell value: " << cells_[index] << endl;
+                    }
 
                     if (cells_[index] == 0)
                     {
@@ -253,7 +260,7 @@ public:
             }
         }
         cells_ = std::move(newCells);
-        cout << cells_[getIndex(0, 0, 0)]<< endl;
+        cout << cells_[getIndex(1, 0, 0)]<< endl;
     }
     int getCell(int x, int y, int z) const
     {
@@ -336,7 +343,7 @@ void initLife3D()
 
 static const Cvec3 g_light1(2.0, 3.0, 16.0),
     g_light2(-2, 3.0, -16.0); // define two lights positions in world space
-static RigTForm g_skyRbt = RigTForm(Cvec3(0.0, 0.25, 30));
+static RigTForm g_skyRbt = RigTForm(Cvec3(0.0, 0.25, g_gridsize*2));
 static RigTForm g_objectRbt[2] = {RigTForm(
                                       Cvec3(-1, 0, 0)),
                                   RigTForm(Cvec3(1, 0, 0))}; // define two cubes
@@ -482,7 +489,7 @@ static void drawStuff()
                     Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt);
                     Matrix4 NMVM = normalMatrix(MVM);
                     sendModelViewNormalMatrix(curSS, MVM, NMVM);
-                    if (x==0&&y==0&&z==0) {
+                    if (x==1&&y==0&&z==0) {
 
                     safe_glUniform3f(curSS.h_uColor, 1.0, 0.0, 0.0);
                     }
@@ -783,7 +790,7 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
             g_spaceDown = true;
             break;
         case GLFW_KEY_V:
-            g_frame_index = (g_frame_index + 1) % 3;
+            /*g_frame_index = (g_frame_index + 1) % 3;
             if (g_frame_index == 0)
             {
                 cout << "Active eye is Sky" << endl;
@@ -795,7 +802,8 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
             else
             {
                 cout << "Active eye is Object 1" << endl;
-            }
+            }*/
+            g_paused = (g_paused == 0) ? 1 : 0;
             break;
         case GLFW_KEY_O:
             /*g_object_index = (g_object_index + 1) % 3;
@@ -909,9 +917,9 @@ void glfwLoop()
     {
         double currentTime = glfwGetTime();
         double simDeltaTime = currentTime - lastSimUpdateTime;
-        if (simDeltaTime >= targetSimDeltaTime)
+        if (simDeltaTime >= targetSimDeltaTime && g_paused == false)
         {
-            //g_life3D.update(); // update the simulation
+            g_life3D.update(); // update the simulation
             lastSimUpdateTime = currentTime;
         }
 
