@@ -63,9 +63,17 @@ static bool g_ego = false;
 
 static int g_gridsize = 60;
 static int g_gridoffset = -1 * g_gridsize / 2;
-static int g_SimFPS = 60;
+static int g_SimFPS = 30;
+
+static int g_max_decay = 0;
+
+std::vector<std::string> g_rules{"4/4/5", "6,9/4,6,8-9/10", "6,7-9,11,13,15-16,18/6-10,13-14,16,18-19,22-25/5"};
+//std::vector<std::string> g_rules{"4/4/5"};
+static int g_rule_index = 0;
 //std::string g_rule = "6,7-9,11,13,15-16,18/6-10,13-14,16,18-19,22-25/5";
-std::string g_rule = "4/4/5";
+
+//std::string g_rule = "4/4/5";
+//std::string g_rule = "6,9/4,6,8-9/10";
 static bool g_paused = true;
 
 // declaration of string helper functions
@@ -206,6 +214,7 @@ public:
     {
         cells_.resize(width * height * depth);
     }
+
     Life3D() : liveRule{}, spawnRule{}
     {
         std::fill_n(liveRule, 27, false);
@@ -213,6 +222,13 @@ public:
 
     }
     int decay;
+
+    void initState(int w, int h, int d) {
+        width_ = w;
+        height_ = h;
+        depth_ = d;
+        cells_.resize(w * h * d);
+    }
 
     void randomInit()
     {
@@ -265,6 +281,20 @@ public:
         }
         cells_ = std::move(newCells);
     }
+    void clear()
+    {
+        for (int x = 0; x < width_; ++x)
+        {
+            for (int y = 0; y < height_; ++y)
+            {
+                for (int z = 0; z < depth_; ++z)
+                {
+                    int index = getIndex(x, y, z);
+                    cells_[index] = 0;
+                }
+            }
+        }
+    }
     int getCell(int x, int y, int z) const
     {
         return cells_[getIndex(x, y, z)];
@@ -275,8 +305,12 @@ public:
 
     void fillArrays()
     {
-        std::vector<std::vector<int>> parsed = parseString(g_rule);
+        std::vector<std::vector<int>> parsed = parseString(g_rules[g_rule_index]);
+        g_max_decay = parsed[2][0] -2;
         decay = parsed[2][0] * -1;
+        std::fill_n(liveRule, 27, false);
+        std::fill_n(spawnRule, 27, false);
+        
         for (int i = 0; i < parsed[0].size(); i++)
         {
             liveRule[parsed[0][i]] = true;
@@ -286,13 +320,10 @@ public:
             spawnRule[parsed[1][i]] = true;
         }
         for (int i = 0; i < 27; i++) {
-            std::cout << liveRule[i] << ',';
         }
         std:: cout << endl;
         for (int i = 0; i < 27; i++) {
-            std::cout << spawnRule[i] << ',';
         }
-        std::cout << endl;
     }
 private:
     int getIndex(int x, int y, int z) const
@@ -330,10 +361,11 @@ private:
     std::vector<int> cells_;
 };
 // Add a global variable for the game state
-Life3D g_life3D(g_gridsize, g_gridsize, g_gridsize);
+Life3D g_life3D(g_gridsize,g_gridsize,g_gridsize);
 // Add this new function to initialize the game state
 void initLife3D()
 {
+    g_life3D.initState(g_gridsize, g_gridsize, g_gridsize);
     srand(time(NULL));
     g_life3D.randomInit();
     g_life3D.fillArrays();
@@ -483,13 +515,24 @@ static void drawStuff()
             for (int z = 0; z < g_life3D.getDepth(); ++z)
             {
                 int temp = g_life3D.getCell(x, y, z);
-                if (temp != 0)
+                if (temp == 1)
                 {
                     RigTForm cubeRbt = RigTForm(Cvec3(x + g_gridoffset, y + g_gridoffset, z + g_gridoffset));
                     Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt);
                     Matrix4 NMVM = normalMatrix(MVM);
                     sendModelViewNormalMatrix(curSS, MVM, NMVM);
-                    safe_glUniform3f(curSS.h_uColor, 1.0, 1.0, 1.0);
+                    safe_glUniform3f(curSS.h_uColor, 0.976, 0.793, 0.125);
+                    // set color
+                    g_cube->draw(curSS);
+                }
+                else if (temp < 0)
+                {
+                    float abt = abs(temp);
+                    RigTForm cubeRbt = RigTForm(Cvec3(x + g_gridoffset, y + g_gridoffset, z + g_gridoffset));
+                    Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt);
+                    Matrix4 NMVM = normalMatrix(MVM);
+                    sendModelViewNormalMatrix(curSS, MVM, NMVM);
+                    safe_glUniform3f(curSS.h_uColor, abt/(float) g_max_decay, abt/(float) g_max_decay, abt/(float) g_max_decay);
                     // set color
                     g_cube->draw(curSS);
                 }
@@ -767,9 +810,11 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
             cout << " ============== H E L P ==============\n\n"
                  << "h\t\thelp menu\n"
                  << "s\t\tsave screenshot\n"
-                 << "f\t\tToggle flat shading on/off.\n"
-                 << "o\t\tCycle object to edit\n"
-                 << "v\t\tCycle view\n"
+                 << "f\t\ttoggle flat shading on/off.\n"
+                 << "o\t\tinitialize Simulation\n"
+                 << "v\t\tpause/play\n"
+                 << "m\t\tadvance one frame\n"
+                 << "c\t\tclear simulation\n"
                  << "drag left mouse to rotate\n"
                  << endl;
             break;
@@ -814,7 +859,27 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
             g_life3D.update();
             //g_ego = !g_ego;
             //cout << "Ego mode: " << g_ego << endl;
+        case GLFW_KEY_C:
+            g_life3D.clear();
+            break;
+        case GLFW_KEY_RIGHT:
+            g_rule_index++;
+            if (g_rule_index > g_rules.size()-1) {
+                g_rule_index = 0;
+            }
+            cout << "Rule\t" << g_rules[g_rule_index] << endl;
+            g_life3D.fillArrays();
+            break;
+        case GLFW_KEY_LEFT:
+            g_rule_index--;
+            if (g_rule_index < 0) {
+                g_rule_index = g_rules.size()-1;
+            }
+            cout << "Rule\t" << g_rules[g_rule_index] << endl;
+            g_life3D.fillArrays();
+            break;
         }
+
     }
     else
     {
@@ -925,6 +990,19 @@ void glfwLoop()
 
 int main(int argc, char *argv[])
 {
+
+    // take the first argument argv[1] as the grid size
+    if (argc > 1) {
+        g_gridsize = stoi(argv[1]);
+        g_gridoffset = -1 * g_gridsize / 2;
+        if (g_gridsize < 25 || g_gridsize > 90) {
+            std::cerr << "Grid size must be between 25 and 90" << endl;
+            return 1;
+        }
+    }
+    cout << argc << endl;
+    cout << argv[1] << endl;
+
     Matrix4 id = Matrix4();
     Matrix4 test_lin = linFact(id);
     Matrix4 test_trans = transFact(id);
