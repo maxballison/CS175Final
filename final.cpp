@@ -61,11 +61,11 @@ static double g_arcballScale = 1;
 
 static bool g_ego = false;
 
-static int g_gridsize = 50;
+static int g_gridsize = 60;
 static int g_gridoffset = -1 * g_gridsize / 2;
-static int g_SimFPS = 30;
-std::string g_rule = "6,9/4,6,8-9/10";
-//std::string g_rule = "4/4/5";
+static int g_SimFPS = 60;
+//std::string g_rule = "6,7-9,11,13,15-16,18/6-10,13-14,16,18-19,22-25/5";
+std::string g_rule = "4/4/5";
 static bool g_paused = true;
 
 // declaration of string helper functions
@@ -206,20 +206,35 @@ public:
     {
         cells_.resize(width * height * depth);
     }
-    Life3D() : spawnRule{}, deathRule{}
+    Life3D() : liveRule{}, spawnRule{}
     {
+        std::fill_n(liveRule, 27, false);
         std::fill_n(spawnRule, 27, false);
-        std::fill_n(deathRule, 27, false);
 
     }
     int decay;
 
     void randomInit()
     {
-        for (int i = 0; i < width_ * height_; ++i)
+        int startX = width_ / 2 - 5;
+        int startY = height_ / 2 - 5;
+        int startZ = depth_ / 2 - 5;
+
+        int endX = startX + 10;
+        int endY = startY + 10;
+        int endZ = startZ + 10;
+
+        for (int x = startX; x < endX; ++x)
         {
-            cells_[i] = rand() % 2;
+        for (int y = startY; y < endY; ++y)
+        {
+            for (int z = startZ; z < endZ; ++z)
+            {
+                    cells_[getIndex(x, y, z)] = rand() % 2;
+            }
         }
+        }
+
     }
     void update()
     {
@@ -233,24 +248,13 @@ public:
                 {
                     int neighbors = countNeighbors(x, y, z);
                     int index = getIndex(x, y, z);
-                    if (index == getIndex(1,0,0) && cells_[index] < 0) {
-                        cout << "neighbors: " << neighbors << endl;
-                        cout << "cell value: " << cells_[index] << endl;
-                    }
-
                     if (cells_[index] == 0)
                     {
-                        if (spawnRule[neighbors] == true) {
-                            newCells[index] = 1;
-                        }
-                        else {
-                            newCells[index] = 0;
-                        }
-                        //newCells[index] = (spawnRule[neighbors] == true) ? 1 : 0;
+                        newCells[index] = (spawnRule[neighbors] == true) ? 1 : 0;
                     }
                     else if (cells_[index] == 1)
                     {
-                        newCells[index] = (deathRule[neighbors] == true) ?  decay : 1;
+                        newCells[index] = (liveRule[neighbors] == true) ?  1 : decay+2;
                     }
                     else
                     {
@@ -260,7 +264,6 @@ public:
             }
         }
         cells_ = std::move(newCells);
-        cout << cells_[getIndex(1, 0, 0)]<< endl;
     }
     int getCell(int x, int y, int z) const
     {
@@ -276,18 +279,18 @@ public:
         decay = parsed[2][0] * -1;
         for (int i = 0; i < parsed[0].size(); i++)
         {
-            spawnRule[parsed[0][i]] = true;
+            liveRule[parsed[0][i]] = true;
         }
         for (int i = 0; i < parsed[1].size(); i++)
         {
-            deathRule[parsed[1][i]] = true;
+            spawnRule[parsed[1][i]] = true;
         }
         for (int i = 0; i < 27; i++) {
-            std::cout << spawnRule[i] << ',';
+            std::cout << liveRule[i] << ',';
         }
         std:: cout << endl;
         for (int i = 0; i < 27; i++) {
-            std::cout << deathRule[i] << ',';
+            std::cout << spawnRule[i] << ',';
         }
         std::cout << endl;
     }
@@ -296,8 +299,8 @@ private:
     {
         return x + y * width_ + z * width_ * height_;
     }
-    bool spawnRule[24];
-    bool deathRule[24];
+    bool liveRule[27];
+    bool spawnRule[27];
     int countNeighbors(int x, int y, int z) const
     {
         int count = 0;
@@ -313,10 +316,7 @@ private:
                     int ny = (y + dy + height_) % height_;
                     int nz = (z + dz + depth_) % depth_;
                     int status = cells_[getIndex(nx, ny, nz)];
-                    if (status < 0) {
-                        count += 1;
-                    }
-                    else {
+                    if (status >= 0) {
                         count += status;
                     }
                 }
@@ -489,13 +489,7 @@ static void drawStuff()
                     Matrix4 MVM = rigTFormToMatrix(invEyeRbt * cubeRbt);
                     Matrix4 NMVM = normalMatrix(MVM);
                     sendModelViewNormalMatrix(curSS, MVM, NMVM);
-                    if (x==1&&y==0&&z==0) {
-
-                    safe_glUniform3f(curSS.h_uColor, 1.0, 0.0, 0.0);
-                    }
-                    else {
                     safe_glUniform3f(curSS.h_uColor, 1.0, 1.0, 1.0);
-                    }
                     // set color
                     g_cube->draw(curSS);
                 }
