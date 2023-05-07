@@ -859,6 +859,7 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
             g_life3D.update();
             //g_ego = !g_ego;
             //cout << "Ego mode: " << g_ego << endl;
+            break;
         case GLFW_KEY_C:
             g_life3D.clear();
             break;
