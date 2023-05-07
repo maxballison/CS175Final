@@ -994,14 +994,15 @@ int main(int argc, char *argv[])
     // take the first argument argv[1] as the grid size
     if (argc > 1) {
         g_gridsize = stoi(argv[1]);
+    }
+    else {
+        g_gridsize = 60;
+    }
         g_gridoffset = -1 * g_gridsize / 2;
         if (g_gridsize < 25 || g_gridsize > 90) {
             std::cerr << "Grid size must be between 25 and 90" << endl;
             return 1;
         }
-    }
-    cout << argc << endl;
-    cout << argv[1] << endl;
 
     Matrix4 id = Matrix4();
     Matrix4 test_lin = linFact(id);
