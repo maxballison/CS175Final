@@ -815,6 +815,7 @@ static void keyboard(GLFWwindow *window, int key, int scancode, int action, int 
                  << "v\t\tpause/play\n"
                  << "m\t\tadvance one frame\n"
                  << "c\t\tclear simulation\n"
+                 << "<- and ->\tswitch rules\n"
                  << "drag left mouse to rotate\n"
                  << endl;
             break;
