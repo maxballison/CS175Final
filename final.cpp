@@ -911,7 +911,7 @@ static void initGlfwState()
     glfwWindowHint(GLFW_SRGB_CAPABLE, GL_TRUE);
 
     g_window = glfwCreateWindow(g_windowWidth, g_windowHeight,
-                                "Assignment 3", NULL, NULL);
+                                "Game of Life 3D", NULL, NULL);
     if (!g_window)
     {
         fprintf(stderr, "Failed to create GLFW window or OpenGL context\n");
